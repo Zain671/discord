@@ -4,8 +4,8 @@ import fetch from "node-fetch";
 const app = express();
 app.use(express.json());
 
-const DISCORD_BOT_TOKEN = process.env.MTQzMzE2ODIxNzQ0MjA5MTIyOQ.G6qTnM.QRWCdbyCksH_lpmLT4QS1BG6Se6Q7GdwB_8ywE;
-const DISCORD_CHANNEL_ID = process.env.1433106499772747879;
+const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 
 app.get("/", (req, res) => res.send("✅ Roblox Discord bot is online."));
 
