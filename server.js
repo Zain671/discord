@@ -45,7 +45,6 @@ app.post("/ban", async (req, res) => {
   }
 });
 
-// 🟢 Set the bot’s online presence when the server starts
 async function setBotStatus() {
   try {
     await fetch("https://discord.com/api/v10/users/@me/settings", {
@@ -55,7 +54,7 @@ async function setBotStatus() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        status: "online", // or "idle", "dnd", "invisible"
+        status: "online", 
         custom_status: { text: "Watching Roblox bans 👀" },
       }),
     });
