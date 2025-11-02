@@ -26,17 +26,17 @@ export default async function handler(req, res) {
 
   const components = [
     {
-      type: 1, // action row
+      type: 1,
       components: [
         {
           type: 2,
-          style: 3, // green
+          style: 3,
           label: "✅ Accept",
           custom_id: `accept_${userId}`,
         },
         {
           type: 2,
-          style: 4, // red
+          style: 4,
           label: "❌ Decline",
           custom_id: `decline_${userId}`,
         },
@@ -45,7 +45,7 @@ export default async function handler(req, res) {
   ];
 
   try {
-    // ✅ FIXED: Changed fetch` to fetch(
+    // ✅ FIXED: Using parentheses, not backticks
     const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
       method: "POST",
       headers: {
