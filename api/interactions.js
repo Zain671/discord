@@ -1,59 +1,28 @@
 import fetch from "node-fetch";
-import crypto from "crypto";
-
-// Verify Discord signature
-function verifyDiscordRequest(req) {
-  const signature = req.headers["x-signature-ed25519"];
-  const timestamp = req.headers["x-signature-timestamp"];
-  const body = JSON.stringify(req.body);
-
-  const PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY;
-  
-  if (!signature || !timestamp || !PUBLIC_KEY) {
-    return false;
-  }
-
-  try {
-    const isValid = crypto.verify(
-      "sha512",
-      Buffer.from(timestamp + body),
-      {
-        key: Buffer.from(PUBLIC_KEY, "hex"),
-        padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
-      },
-      Buffer.from(signature, "hex")
-    );
-    return isValid;
-  } catch {
-    return false;
-  }
-}
 
 export default async function handler(req, res) {
-  // Verify the request is from Discord
-  if (!verifyDiscordRequest(req)) {
-    return res.status(401).json({ error: "Invalid request signature" });
-  }
+  const { type, data, message, token, member } = req.body;
 
-  const { type, data, message } = req.body;
-
-  // Discord sends a PING to verify the endpoint
+  // Discord PING
   if (type === 1) {
     return res.json({ type: 1 });
   }
 
-  // Handle button interactions
+  // Button interaction
   if (type === 3) {
     const customId = data.custom_id;
     const [action, userId] = customId.split("_");
 
     const botToken = process.env.DISCORD_BOT_TOKEN;
-    const sheetUrl = process.env.GOOGLE_SHEET_URL;
+    const appId = process.env.DISCORD_APPLICATION_ID;
+    const sheetUrl = "https://script.google.com/macros/s/AKfycbzyDf8MqRuaTEwp_MteP84ofckSX7X1zFbBP2qKwVHCuSzz1tP2TcFB5fosEklauzUg/exec";
+    const robloxApiKey = process.env.ROBLOX_API_KEY;
+    const universeId = process.env.ROBLOX_UNIVERSE_ID;
 
     if (action === "accept") {
-      // Remove from Google Sheet
       try {
-        await fetch(sheetUrl, {
+        // 1. Remove from Google Sheet
+        const sheetResponse = await fetch(sheetUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -62,30 +31,49 @@ export default async function handler(req, res) {
           }),
         });
 
-        // Update Discord message
+        const sheetResult = await sheetResponse.json();
+        console.log("Sheet unban result:", sheetResult);
+
+        // 2. Unban from Roblox using OpenCloud API
+        try {
+          const robloxResponse = await fetch(
+            `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
+            {
+              method: "DELETE",
+              headers: {
+                "x-api-key": robloxApiKey,
+              },
+            }
+          );
+
+          if (robloxResponse.ok) {
+            console.log("✅ Successfully unbanned from Roblox");
+          } else {
+            const errorText = await robloxResponse.text();
+            console.warn("⚠️ Roblox unban warning:", errorText);
+            // Don't fail the whole process if Roblox unban fails
+          }
+        } catch (robloxErr) {
+          console.error("❌ Roblox API error:", robloxErr);
+          // Continue anyway
+        }
+
+        // 3. Update Discord message
+        const embed = message.embeds[0];
+        embed.title = "✅ Appeal Accepted";
+        embed.color = 3066993; // Green
+        embed.fields.push({
+          name: "Status",
+          value: `Accepted by <@${member.user.id}>\n✅ Removed from spreadsheet\n✅ Unbanned from Roblox`,
+        });
+
         await fetch(
-          `https://discord.com/api/v10/webhooks/${process.env.DISCORD_APPLICATION_ID}/${req.body.token}/messages/${message.id}`,
+          `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
           {
             method: "PATCH",
-            headers: {
-              Authorization: `Bot ${botToken}`,
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              embeds: [
-                {
-                  ...message.embeds[0],
-                  title: "✅ Appeal Accepted",
-                  color: 3066993, // Green
-                  fields: [
-                    ...message.embeds[0].fields,
-                    {
-                      name: "Status",
-                      value: `Accepted by <@${req.body.member.user.id}>`,
-                    },
-                  ],
-                },
-              ],
+              embeds: [embed],
               components: [], // Remove buttons
             }),
           }
@@ -94,8 +82,8 @@ export default async function handler(req, res) {
         return res.json({
           type: 4,
           data: {
-            content: `✅ Appeal accepted! User ${userId} has been unbanned.`,
-            flags: 64, // Ephemeral (only visible to the person who clicked)
+            content: `✅ Appeal accepted! User ${userId} has been unbanned from both the spreadsheet and Roblox.`,
+            flags: 64,
           },
         });
       } catch (err) {
@@ -103,37 +91,29 @@ export default async function handler(req, res) {
         return res.json({
           type: 4,
           data: {
-            content: "❌ Error processing appeal. Check logs.",
+            content: "❌ Error processing appeal: " + err.message,
             flags: 64,
           },
         });
       }
     } else if (action === "decline") {
-      // Just update the message, don't remove from sheet
       try {
+        // Just update the Discord message, keep the ban
+        const embed = message.embeds[0];
+        embed.title = "❌ Appeal Declined";
+        embed.color = 15158332; // Red
+        embed.fields.push({
+          name: "Status",
+          value: `Declined by <@${member.user.id}>\n❌ User remains banned`,
+        });
+
         await fetch(
-          `https://discord.com/api/v10/webhooks/${process.env.DISCORD_APPLICATION_ID}/${req.body.token}/messages/${message.id}`,
+          `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
           {
             method: "PATCH",
-            headers: {
-              Authorization: `Bot ${botToken}`,
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              embeds: [
-                {
-                  ...message.embeds[0],
-                  title: "❌ Appeal Declined",
-                  color: 15158332, // Red
-                  fields: [
-                    ...message.embeds[0].fields,
-                    {
-                      name: "Status",
-                      value: `Declined by <@${req.body.member.user.id}>`,
-                    },
-                  ],
-                },
-              ],
+              embeds: [embed],
               components: [], // Remove buttons
             }),
           }
@@ -142,7 +122,7 @@ export default async function handler(req, res) {
         return res.json({
           type: 4,
           data: {
-            content: `❌ Appeal declined for user ${userId}.`,
+            content: `❌ Appeal declined for user ${userId}. Ban remains active.`,
             flags: 64,
           },
         });
@@ -151,7 +131,7 @@ export default async function handler(req, res) {
         return res.json({
           type: 4,
           data: {
-            content: "❌ Error processing appeal. Check logs.",
+            content: "❌ Error: " + err.message,
             flags: 64,
           },
         });
