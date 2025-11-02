@@ -1,169 +1,169 @@
-import fetch from "node-fetch";
-
 export default async function handler(req, res) {
-  const { type, data, message, token, member, application_id } = req.body;
-
-  // Discord PING - must respond with type 1
-  if (type === 1) {
-    return res.json({ type: 1 });
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return;
   }
 
-  // Button interaction
-  if (type === 3) {
-    const customId = data.custom_id;
-    const [action, userId] = customId.split("_");
-
-    // ✅ RESPOND IMMEDIATELY - This is critical!
-    res.status(200).json({
-      type: 5, // Deferred response
-    });
-
-    // Now do everything else asynchronously
-    const appId = application_id || process.env.DISCORD_APPLICATION_ID;
-    const sheetUrl = "https://script.google.com/macros/s/AKfycbzyDf8MqRuaTEwp_MteP84ofckSX7X1zFbBP2qKwVHCuSzz1tP2TcFB5fosEklauzUg/exec";
-    const robloxApiKey = process.env.ROBLOX_API_KEY;
-    const universeId = process.env.ROBLOX_UNIVERSE_ID;
-
-    // Do NOT await this - let it run in background
-    processInteraction(action, userId, appId, token, message, member, sheetUrl, robloxApiKey, universeId);
-    
-    return; // Exit immediately after sending response
+  // Only accept POST requests
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
-  return res.status(400).json({ error: "Unknown interaction type" });
+  try {
+    const body = req.body;
+    const type = body?.type;
+
+    console.log("Interaction received, type:", type);
+
+    // Discord PING verification (required for endpoint setup)
+    if (type === 1) {
+      console.log("PING received, responding with PONG");
+      return res.status(200).json({ type: 1 });
+    }
+
+    // Button interaction (type 3)
+    if (type === 3) {
+      const customId = body.data?.custom_id || "";
+      const [action, userId] = customId.split("_");
+      const message = body.message;
+      const token = body.token;
+      const member = body.member;
+      const appId = body.application_id;
+
+      console.log("Button clicked:", action, "for user:", userId);
+
+      // Respond immediately to Discord (prevents timeout)
+      res.status(200).json({ type: 5 });
+
+      // Process button click in background
+      processButton(action, userId, appId, token, message, member).catch(err => {
+        console.error("Background processing error:", err);
+      });
+
+      return;
+    }
+
+    // Unknown interaction type
+    return res.status(400).json({ error: "Unknown interaction type" });
+
+  } catch (error) {
+    console.error("Handler error:", error);
+    return res.status(500).json({ error: error.message });
+  }
 }
 
-// Separate async function to process in background
-async function processInteraction(action, userId, appId, token, message, member, sheetUrl, robloxApiKey, universeId) {
+// Background processing function
+async function processButton(action, userId, appId, token, message, member) {
+  const sheetUrl = "https://script.google.com/macros/s/AKfycbzyDf8MqRuaTEwp_MteP84ofckSX7X1zFbBP2qKwVHCuSzz1tP2TcFB5fosEklauzUg/exec";
+  const robloxApiKey = process.env.ROBLOX_API_KEY;
+  const universeId = process.env.ROBLOX_UNIVERSE_ID;
+
   try {
     if (action === "accept") {
-      let results = {
-        sheet: { success: false, error: null },
-        roblox: { success: false, error: null }
-      };
+      let sheetSuccess = false;
+      let robloxSuccess = false;
 
-      // 1. Unban from Google Sheet
+      // 1. Remove from Google Spreadsheet
       try {
+        console.log("Unbanning from spreadsheet:", userId);
         const sheetResponse = await fetch(sheetUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "unban",
-            userId: userId,
+          body: JSON.stringify({ 
+            action: "unban", 
+            userId: userId 
           }),
         });
-
+        
         const sheetData = await sheetResponse.json();
-        results.sheet.success = sheetData.success === true;
-        results.sheet.error = sheetData.error || sheetData.message;
-        console.log("Sheet result:", sheetData);
-      } catch (err) {
-        results.sheet.error = err.message;
-        console.error("Sheet error:", err);
+        sheetSuccess = sheetData.success === true;
+        console.log("Spreadsheet unban result:", sheetSuccess);
+      } catch (sheetErr) {
+        console.error("Spreadsheet error:", sheetErr);
       }
 
-      // 2. Unban from Roblox
+      // 2. Unban from Roblox (if API key configured)
       if (robloxApiKey && universeId) {
         try {
+          console.log("Unbanning from Roblox:", userId);
           const robloxResponse = await fetch(
             `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
-            {
-              method: "DELETE",
-              headers: {
-                "x-api-key": robloxApiKey,
-              },
+            { 
+              method: "DELETE", 
+              headers: { "x-api-key": robloxApiKey } 
             }
           );
-
-          results.roblox.success = robloxResponse.ok;
-          if (!robloxResponse.ok) {
-            results.roblox.error = await robloxResponse.text();
-          }
-          console.log("Roblox unban:", robloxResponse.status);
-        } catch (err) {
-          results.roblox.error = err.message;
-          console.error("Roblox error:", err);
+          
+          robloxSuccess = robloxResponse.ok;
+          console.log("Roblox unban result:", robloxSuccess, robloxResponse.status);
+        } catch (robloxErr) {
+          console.error("Roblox error:", robloxErr);
         }
       }
 
       // 3. Update Discord message
-      const embed = message.embeds[0];
-      embed.title = "✅ Appeal Accepted";
-      embed.color = 3066993;
+      const newEmbed = {
+        ...message.embeds[0],
+        title: "✅ Appeal Accepted",
+        color: 3066993, // Green
+        fields: [
+          ...message.embeds[0].fields,
+          { 
+            name: "Status", 
+            value: `Accepted by <@${member.user.id}>\n${sheetSuccess ? "✅" : "❌"} Spreadsheet\n${robloxSuccess ? "✅" : "⚠️"} Roblox`
+          }
+        ]
+      };
 
-      let statusText = `Accepted by <@${member.user.id}>\n`;
-      statusText += results.sheet.success ? "✅ Removed from spreadsheet\n" : `❌ Spreadsheet: ${results.sheet.error || "Failed"}\n`;
-      statusText += results.roblox.success ? "✅ Unbanned from Roblox" : (robloxApiKey ? `⚠️ Roblox: ${results.roblox.error || "Failed"}` : "⚠️ Roblox unban not configured");
-
-      embed.fields.push({
-        name: "Status",
-        value: statusText,
-      });
-
-      // Update the original message
       await fetch(
         `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            embeds: [embed],
-            components: [],
+          body: JSON.stringify({ 
+            embeds: [newEmbed], 
+            components: [] // Remove buttons
           }),
         }
       );
 
-      // Send follow-up
-      await fetch(
-        `https://discord.com/api/v10/webhooks/${appId}/${token}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: `✅ Appeal processed for user ${userId}.`,
-            flags: 64,
-          }),
-        }
-      );
+      console.log("✅ Appeal accepted for user:", userId);
 
     } else if (action === "decline") {
-      // Update message
-      const embed = message.embeds[0];
-      embed.title = "❌ Appeal Declined";
-      embed.color = 15158332;
-      embed.fields.push({
-        name: "Status",
-        value: `Declined by <@${member.user.id}>\n❌ User remains banned`,
-      });
+      // Update Discord message only (don't unban)
+      const newEmbed = {
+        ...message.embeds[0],
+        title: "❌ Appeal Declined",
+        color: 15158332, // Red
+        fields: [
+          ...message.embeds[0].fields,
+          { 
+            name: "Status", 
+            value: `Declined by <@${member.user.id}>\n❌ User remains banned`
+          }
+        ]
+      };
 
       await fetch(
         `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            embeds: [embed],
-            components: [],
+          body: JSON.stringify({ 
+            embeds: [newEmbed], 
+            components: [] // Remove buttons
           }),
         }
       );
 
-      await fetch(
-        `https://discord.com/api/v10/webhooks/${appId}/${token}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: `❌ Appeal declined for user ${userId}.`,
-            flags: 64,
-          }),
-        }
-      );
+      console.log("❌ Appeal declined for user:", userId);
     }
+
   } catch (err) {
-    console.error("Fatal error:", err);
+    console.error("Fatal error in processButton:", err);
     
-    // Try to send error message
+    // Try to send error notification to Discord
     try {
       await fetch(
         `https://discord.com/api/v10/webhooks/${appId}/${token}`,
@@ -171,13 +171,13 @@ async function processInteraction(action, userId, appId, token, message, member,
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            content: `❌ Error: ${err.message}`,
-            flags: 64,
+            content: `⚠️ Error processing appeal for user ${userId}: ${err.message}`,
+            flags: 64 // Ephemeral
           }),
         }
       );
     } catch (webhookErr) {
-      console.error("Webhook error:", webhookErr);
+      console.error("Failed to send error webhook:", webhookErr);
     }
   }
 }
