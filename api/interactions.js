@@ -3,28 +3,22 @@ import fetch from "node-fetch";
 export default async function handler(req, res) {
   const { type, data, message, token, member, application_id } = req.body;
 
-  // Discord PING
   if (type === 1) {
     return res.json({ type: 1 });
   }
-
-  // Button interaction
   if (type === 3) {
     const customId = data.custom_id;
     const [action, userId] = customId.split("_");
 
-    // ✅ RESPOND IMMEDIATELY with "thinking" state
     res.json({
-      type: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+      type: 5, 
     });
 
-    // Now process in background
     const appId = application_id || process.env.DISCORD_APPLICATION_ID;
     const sheetUrl = "https://script.google.com/macros/s/AKfycbzyDf8MqRuaTEwp_MteP84ofckSX7X1zFbBP2qKwVHCuSzz1tP2TcFB5fosEklauzUg/exec";
     const robloxApiKey = process.env.ROBLOX_API_KEY;
     const universeId = process.env.ROBLOX_UNIVERSE_ID;
 
-    // Process the action asynchronously
     (async () => {
       try {
         if (action === "accept") {
@@ -32,7 +26,6 @@ export default async function handler(req, res) {
           let robloxSuccess = false;
           let errors = [];
 
-          // 1. Remove from Google Sheet
           try {
             const sheetResponse = await fetch(sheetUrl, {
               method: "POST",
@@ -55,7 +48,6 @@ export default async function handler(req, res) {
             errors.push("Spreadsheet: " + sheetErr.message);
           }
 
-          // 2. Unban from Roblox using OpenCloud API
           try {
             const robloxResponse = await fetch(
               `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
@@ -80,7 +72,6 @@ export default async function handler(req, res) {
             errors.push("Roblox: " + robloxErr.message);
           }
 
-          // 3. Update Discord message
           const embed = message.embeds[0];
           embed.title = "✅ Appeal Accepted";
           embed.color = 3066993;
@@ -110,7 +101,6 @@ export default async function handler(req, res) {
             }
           );
 
-          // Send follow-up message
           await fetch(
             `https://discord.com/api/v10/webhooks/${appId}/${token}`,
             {
@@ -126,7 +116,6 @@ export default async function handler(req, res) {
           );
 
         } else if (action === "decline") {
-          // Update the Discord message
           const embed = message.embeds[0];
           embed.title = "❌ Appeal Declined";
           embed.color = 15158332;
@@ -147,7 +136,6 @@ export default async function handler(req, res) {
             }
           );
 
-          // Send follow-up message
           await fetch(
             `https://discord.com/api/v10/webhooks/${appId}/${token}`,
             {
@@ -163,7 +151,6 @@ export default async function handler(req, res) {
       } catch (err) {
         console.error("Fatal error in background processing:", err);
         
-        // Try to send error message
         try {
           await fetch(
             `https://discord.com/api/v10/webhooks/${appId}/${token}`,
@@ -182,7 +169,6 @@ export default async function handler(req, res) {
       }
     })();
 
-    // Response already sent above
     return;
   }
 
