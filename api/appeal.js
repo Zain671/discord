@@ -5,7 +5,7 @@ export default async function handler(req, res) {
 
   const { username, userId, reason, banReason, moderator } = req.body;
   const botToken = process.env.DISCORD_BOT_TOKEN;
-  const channelId = process.env.DISCORD_CHANNEL_ID; // Add this in Vercel too!
+  const channelId = process.env.DISCORD_CHANNEL_ID;
 
   if (!botToken || !channelId) {
     return res.status(500).json({ error: "Missing Discord credentials" });
@@ -45,6 +45,7 @@ export default async function handler(req, res) {
   ];
 
   try {
+    // ✅ FIXED: Changed fetch` to fetch(
     const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
       method: "POST",
       headers: {
