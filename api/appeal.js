@@ -1,6 +1,6 @@
 import fetch from "node-fetch";
 
-export default async function handler(req, res) {
+export default async function handler(req, res) 
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
   const { username, userId, reason, banReason, moderator } = req.body;
