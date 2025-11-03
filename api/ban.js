@@ -1,7 +1,7 @@
 export default async function handler(req, res) {
   // Only accept POST requests
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "POST only" });
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   // Get data from request body
@@ -13,6 +13,7 @@ export default async function handler(req, res) {
 
   // Check if credentials exist
   if (!botToken || !channelId) {
+    console.error("Missing Discord credentials");
     return res.status(500).json({ error: "Missing Discord credentials" });
   }
 
@@ -59,6 +60,6 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error("❌ Error sending ban:", err);
-    return res.status(500).json({ error: "Failed to send ban to Discord" });
+    return res.status(500).json({ error: "Failed to send ban to Discord", details: err.message });
   }
 }
