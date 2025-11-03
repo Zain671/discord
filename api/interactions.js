@@ -54,11 +54,15 @@ export default async function handler(req, res) {
       const customId = data?.custom_id || "";
       const [action, userId] = customId.split("_");
 
-      // Respond immediately
-      res.status(200).json({ type: 5 });
+      // ✅ FIXED: Respond immediately with type 6 (DEFERRED_UPDATE_MESSAGE)
+      // This prevents the "thinking" state
+      res.status(200).json({ type: 6 });
 
       // Process in background
-      handleButton(action, userId, application_id, token, message, member);
+      setImmediate(() => {
+        handleButton(action, userId, application_id, token, message, member);
+      });
+      
       return;
     }
 
@@ -84,22 +88,85 @@ async function handleButton(action, userId, appId, token, message, member) {
         body: JSON.stringify({ action: "unban", userId }),
       });
 
-      // Unban from Roblox
+      // ✅ FIXED: Properly unban from Roblox with error handling
       if (robloxKey && universeId) {
-        await fetch(
-          `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
-          { method: "DELETE", headers: { "x-api-key": robloxKey } }
-        );
+        try {
+          const robloxResponse = await fetch(
+            `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
+            { 
+              method: "DELETE", 
+              headers: { 
+                "x-api-key": robloxKey 
+              } 
+            }
+          );
+
+          if (!robloxResponse.ok) {
+            const errorText = await robloxResponse.text();
+            console.error("Roblox unban failed:", errorText);
+            
+            // Still update Discord but note the error
+            const embed = {
+              ...message.embeds[0],
+              title: "⚠️ Appeal Accepted (Roblox Unban Failed)",
+              color: 16776960, // Yellow color
+              fields: [
+                ...message.embeds[0].fields,
+                { name: "Status", value: `Accepted by <@${member.user.id}>` },
+                { name: "Error", value: "Failed to unban from Roblox. Please unban manually." }
+              ]
+            };
+
+            await fetch(
+              `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
+              {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ embeds: [embed], components: [] }),
+              }
+            );
+            return;
+          }
+
+          console.log(`✅ Successfully unbanned user ${userId} from Roblox`);
+        } catch (robloxError) {
+          console.error("Roblox API error:", robloxError);
+          
+          // Update embed with error
+          const embed = {
+            ...message.embeds[0],
+            title: "⚠️ Appeal Accepted (Roblox Error)",
+            color: 16776960,
+            fields: [
+              ...message.embeds[0].fields,
+              { name: "Status", value: `Accepted by <@${member.user.id}>` },
+              { name: "Error", value: "Could not connect to Roblox API. Please unban manually." }
+            ]
+          };
+
+          await fetch(
+            `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ embeds: [embed], components: [] }),
+            }
+          );
+          return;
+        }
+      } else {
+        console.warn("Missing ROBLOX_API_KEY or ROBLOX_UNIVERSE_ID");
       }
 
-      // Update embed
+      // Update embed on success
       const embed = {
         ...message.embeds[0],
         title: "✅ Appeal Accepted",
         color: 3066993,
         fields: [
           ...message.embeds[0].fields,
-          { name: "Status", value: `Accepted by <@${member.user.id}>` }
+          { name: "Status", value: `Accepted by <@${member.user.id}>` },
+          { name: "Roblox", value: "✅ Player unbanned successfully" }
         ]
       };
 
@@ -133,6 +200,30 @@ async function handleButton(action, userId, appId, token, message, member) {
       );
     }
   } catch (err) {
-    console.error("Button error:", err);
+    console.error("Button handler error:", err);
+    
+    // Try to update the message with an error state
+    try {
+      const embed = {
+        ...message.embeds[0],
+        title: "❌ Error Processing Appeal",
+        color: 15158332,
+        fields: [
+          ...message.embeds[0].fields,
+          { name: "Error", value: "An error occurred. Please try again or process manually." }
+        ]
+      };
+
+      await fetch(
+        `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ embeds: [embed], components: [] }),
+        }
+      );
+    } catch (updateError) {
+      console.error("Failed to update message with error:", updateError);
+    }
   }
 }
