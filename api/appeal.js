@@ -45,7 +45,7 @@ export default async function handler(req, res) {
   ];
 
   try {
-    // ✅ FIXED: Using parentheses, not backticks
+    // ✅ FIXED: Using parentheses instead of backticks
     const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
       method: "POST",
       headers: {
