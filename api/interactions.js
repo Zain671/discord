@@ -92,14 +92,16 @@ async function handleButton(action, userId, appId, token, message, member) {
       if (robloxKey && universeId) {
         try {
           const robloxResponse = await fetch(
-            `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
-            { 
-              method: "DELETE", 
-              headers: { 
-                "x-api-key": robloxKey 
-              } 
-            }
-          );
+  `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
+  { 
+    method: "PATCH", 
+    headers: { 
+      "x-api-key": robloxKey,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ banned: false })
+  }
+);
 
           if (!robloxResponse.ok) {
             const errorText = await robloxResponse.text();
