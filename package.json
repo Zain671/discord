@@ -1,11 +1,11 @@
 {
   "name": "roblox-discord-bot",
-  "name": "discord-bot-api",
 "version": "1.0.0",
 "type": "module",
 "dependencies": {
 "express": "^4.19.2",
-"node-fetch": "^3.3.2"
+"node-fetch": "^3.3.0",
+"tweetnacl": "^1.0.3"
 },
 "scripts": {
 "start": "node server.js"
