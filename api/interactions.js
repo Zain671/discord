@@ -1,7 +1,6 @@
 import nacl from "tweetnacl";
 
 export default async function handler(req, res) {
-  // Set response headers
   res.setHeader("Content-Type", "application/json");
 
   if (req.method === "OPTIONS") {
@@ -12,7 +11,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Get Discord signature headers
   const signature = req.headers["x-signature-ed25519"];
   const timestamp = req.headers["x-signature-timestamp"];
   const publicKey = process.env.DISCORD_PUBLIC_KEY;
@@ -22,7 +20,6 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Missing headers" });
   }
 
-  // Verify the request signature
   try {
     const body = JSON.stringify(req.body);
     const isValid = nacl.sign.detached.verify(
@@ -40,22 +37,18 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Verification failed" });
   }
 
-  // Process the interaction
   try {
     const { type, data, message, token, member, application_id } = req.body;
 
-    // Discord PING
     if (type === 1) {
       return res.status(200).json({ type: 1 });
     }
 
-    // Button interaction
     if (type === 3) {
       const customId = data?.custom_id || "";
       const [action, userId] = customId.split("_");
 
-      // ✅ FIXED: Respond immediately with type 6 (DEFERRED_UPDATE_MESSAGE)
-      // This prevents the "thinking" state
+      // Respond immediately to prevent timeout
       res.status(200).json({ type: 6 });
 
       // Process in background
@@ -81,37 +74,38 @@ async function handleButton(action, userId, appId, token, message, member) {
 
   try {
     if (action === "accept") {
-      // Unban from sheet
-      await fetch(sheetUrl, {
+      // Unban from sheet - AWAIT THIS!
+      const sheetResponse = await fetch(sheetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "unban", userId }),
       });
 
-      // ✅ FIXED: Properly unban from Roblox with error handling
+      if (!sheetResponse.ok) {
+        console.error("Sheet unban failed:", await sheetResponse.text());
+      }
+
+      // Unban from Roblox - FIX: Use DELETE method, not PATCH
       if (robloxKey && universeId) {
         try {
           const robloxResponse = await fetch(
-  `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
-  { 
-    method: "PATCH", 
-    headers: { 
-      "x-api-key": robloxKey,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ banned: false })
-  }
-);
+            `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
+            { 
+              method: "DELETE", // ✅ FIXED: Changed from PATCH to DELETE
+              headers: { 
+                "x-api-key": robloxKey
+              }
+            }
+          );
 
           if (!robloxResponse.ok) {
             const errorText = await robloxResponse.text();
             console.error("Roblox unban failed:", errorText);
             
-            // Still update Discord but note the error
             const embed = {
               ...message.embeds[0],
               title: "⚠️ Appeal Accepted (Roblox Unban Failed)",
-              color: 16776960, // Yellow color
+              color: 16776960,
               fields: [
                 ...message.embeds[0].fields,
                 { name: "Status", value: `Accepted by <@${member.user.id}>` },
@@ -134,7 +128,6 @@ async function handleButton(action, userId, appId, token, message, member) {
         } catch (robloxError) {
           console.error("Roblox API error:", robloxError);
           
-          // Update embed with error
           const embed = {
             ...message.embeds[0],
             title: "⚠️ Appeal Accepted (Roblox Error)",
@@ -204,7 +197,6 @@ async function handleButton(action, userId, appId, token, message, member) {
   } catch (err) {
     console.error("Button handler error:", err);
     
-    // Try to update the message with an error state
     try {
       const embed = {
         ...message.embeds[0],
