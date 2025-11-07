@@ -1,13 +1,14 @@
 {
-  "name": "roblox-discord-bot",
-"version": "1.0.0",
-"type": "module",
-"dependencies": {
-"express": "^4.19.2",
-"node-fetch": "^3.3.0",
-"tweetnacl": "^1.0.3"
-},
-"scripts": {
-"start": "node server.js"
-}
+  "name": "roblox-discord-bot-mongodb",
+  "version": "2.0.0",
+  "type": "module",
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.0",
+    "tweetnacl": "^1.0.3",
+    "mongodb": "^6.3.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
 }
