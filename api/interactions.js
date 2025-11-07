@@ -1,4 +1,9 @@
+// api/interactions.js
+// Discord interaction handler with MongoDB + Roblox Cloud API
+
 import nacl from "tweetnacl";
+import clientPromise from '../lib/mongodb.js';
+import fetch from 'node-fetch';
 
 export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/json");
@@ -50,11 +55,10 @@ export default async function handler(req, res) {
 
       console.log(`🔵 Button: ${action} for user ${userId}`);
 
-      // Respond immediately - NO waiting for anything
+      // Respond immediately
       res.status(200).json({ type: 6 });
 
-      // Process everything asynchronously WITHOUT awaiting
-      // This prevents Vercel timeouts
+      // Process in background
       processButton(action, userId, application_id, token, message, member);
       
       return;
@@ -68,182 +72,145 @@ export default async function handler(req, res) {
   }
 }
 
-// Fire-and-forget: This runs AFTER the response is sent
-// Even if it takes 30 seconds, Vercel won't timeout
-function processButton(action, userId, appId, token, message, member) {
-  const sheetUrl = "https://script.google.com/macros/s/AKfycbzyDf8MqRuaTEwp_MteP84ofckSX7X1zFbBP2qKwVHCuSzz1tP2TcFB5fosEklauzUg/exec";
+async function processButton(action, userId, appId, token, message, member) {
   const robloxKey = process.env.ROBLOX_API_KEY;
   const universeId = process.env.ROBLOX_UNIVERSE_ID;
 
   if (action === "accept") {
     console.log(`✅ Processing accept for ${userId}`);
     
-    // Track what succeeds/fails
     const results = {
-      sheet: false,
+      mongodb: false,
       roblox: false,
-      sheetError: null,
+      mongodbError: null,
       robloxError: null
     };
 
-    // Step 1: Unban from sheet (with timeout)
-    const sheetPromise = Promise.race([
-      fetch(sheetUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          action: "unban", 
-          userId: String(userId)
-        })
-      }).then(async (res) => {
-        console.log(`📊 Sheet status: ${res.status}`);
-        const text = await res.text();
-        console.log(`📊 Sheet response: ${text.substring(0, 200)}`);
-        
-        try {
-          const data = JSON.parse(text);
-          if (data.success) {
-            results.sheet = true;
-            console.log(`✅ Sheet: User ${userId} removed`);
-          } else {
-            results.sheetError = data.message || "Unknown error";
-            console.log(`❌ Sheet failed: ${results.sheetError}`);
-          }
-        } catch (e) {
-          results.sheetError = "Invalid JSON response";
-          console.log(`❌ Sheet returned non-JSON: ${text.substring(0, 100)}`);
-        }
-      }),
-      // 8 second timeout for sheet
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Sheet timeout")), 8000)
-      )
-    ]).catch((err) => {
-      results.sheetError = err.message;
-      console.log(`❌ Sheet error: ${err.message}`);
-    });
+    // Step 1: Unban from MongoDB (FAST!)
+    try {
+      const client = await clientPromise;
+      const db = client.db(process.env.MONGODB_DB_NAME || 'roblox_bans');
+      const bansCollection = db.collection('bans');
 
-    // Step 2: Unban from Roblox (with timeout)
-    const robloxPromise = (robloxKey && universeId) ? Promise.race([
-      fetch(
-        `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
-        {
-          method: "DELETE",
-          headers: { "x-api-key": robloxKey }
+      const result = await bansCollection.updateOne(
+        { userId: String(userId) },
+        { 
+          $set: { 
+            active: false,
+            unbannedAt: new Date(),
+            updatedAt: new Date()
+          }
         }
-      ).then(async (res) => {
-        console.log(`🎮 Roblox status: ${res.status}`);
-        
-        if (res.status === 200 || res.status === 204) {
+      );
+
+      if (result.matchedCount > 0) {
+        results.mongodb = true;
+        console.log(`✅ MongoDB: User ${userId} unbanned`);
+      } else {
+        results.mongodbError = "User not found in database";
+        console.log(`⚠️ MongoDB: User ${userId} not found`);
+      }
+    } catch (mongoError) {
+      results.mongodbError = mongoError.message;
+      console.error(`❌ MongoDB error:`, mongoError);
+    }
+
+    // Step 2: Unban from Roblox
+    if (robloxKey && universeId) {
+      try {
+        const robloxResponse = await Promise.race([
+          fetch(
+            `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
+            {
+              method: "DELETE",
+              headers: { "x-api-key": robloxKey }
+            }
+          ),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Roblox timeout")), 8000)
+          )
+        ]);
+
+        console.log(`🎮 Roblox status: ${robloxResponse.status}`);
+
+        if (robloxResponse.status === 200 || robloxResponse.status === 204) {
           results.roblox = true;
           console.log(`✅ Roblox: User ${userId} unbanned`);
-        } else if (res.status === 404) {
-          results.roblox = true; // Not banned = success
+        } else if (robloxResponse.status === 404) {
+          results.roblox = true;
           console.log(`✅ Roblox: User ${userId} wasn't banned (404)`);
         } else {
-          const text = await res.text();
-          results.robloxError = `Status ${res.status}: ${text}`;
-          console.log(`❌ Roblox failed: ${results.robloxError}`);
+          const text = await robloxResponse.text();
+          results.robloxError = `Status ${robloxResponse.status}`;
+          console.error(`❌ Roblox error:`, text);
         }
-      }),
-      // 8 second timeout for Roblox
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Roblox timeout")), 8000)
-      )
-    ]).catch((err) => {
-      results.robloxError = err.message;
-      console.log(`❌ Roblox error: ${err.message}`);
-    }) : Promise.resolve();
-
-    // Step 3: Wait for both, then update Discord
-    Promise.all([sheetPromise, robloxPromise]).finally(() => {
-      console.log(`📊 Final results:`, results);
-      
-      // Build embed based on results
-      let embed;
-      let title;
-      let color;
-      
-      if (results.sheet && results.roblox) {
-        // Full success
-        title = "✅ Appeal Accepted";
-        color = 3066993; // Green
-        embed = {
-          ...message.embeds[0],
-          title,
-          color,
-          fields: [
-            ...message.embeds[0].fields,
-            { name: "Status", value: `Accepted by <@${member.user.id}>` },
-            { name: "Spreadsheet", value: "✅ Removed" },
-            { name: "Roblox", value: "✅ Unbanned" }
-          ]
-        };
-      } else if (results.sheet && !results.roblox) {
-        // Sheet worked, Roblox failed
-        title = "⚠️ Partially Accepted";
-        color = 16776960; // Yellow
-        embed = {
-          ...message.embeds[0],
-          title,
-          color,
-          fields: [
-            ...message.embeds[0].fields,
-            { name: "Status", value: `Accepted by <@${member.user.id}>` },
-            { name: "Spreadsheet", value: "✅ Removed" },
-            { name: "Roblox", value: `❌ ${results.robloxError || "Failed"}\nPlease unban manually in-game.` }
-          ]
-        };
-      } else if (!results.sheet && results.roblox) {
-        // Roblox worked, sheet failed
-        title = "⚠️ Partially Accepted";
-        color = 16776960; // Yellow
-        embed = {
-          ...message.embeds[0],
-          title,
-          color,
-          fields: [
-            ...message.embeds[0].fields,
-            { name: "Status", value: `Accepted by <@${member.user.id}>` },
-            { name: "Spreadsheet", value: `❌ ${results.sheetError || "Failed"}\nPlease remove manually.` },
-            { name: "Roblox", value: "✅ Unbanned" }
-          ]
-        };
-      } else {
-        // Both failed
-        title = "❌ Error Processing Appeal";
-        color = 15158332; // Red
-        embed = {
-          ...message.embeds[0],
-          title,
-          color,
-          fields: [
-            ...message.embeds[0].fields,
-            { name: "Status", value: `Attempted by <@${member.user.id}>` },
-            { name: "Spreadsheet", value: `❌ ${results.sheetError || "Failed"}` },
-            { name: "Roblox", value: `❌ ${results.robloxError || "Failed"}` }
-          ]
-        };
+      } catch (robloxErr) {
+        results.robloxError = robloxErr.message;
+        console.error(`❌ Roblox error:`, robloxErr);
       }
+    } else {
+      results.robloxError = "Missing Roblox credentials";
+    }
 
-      // Update Discord message
-      fetch(
-        `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ embeds: [embed], components: [] })
-        }
-      ).then(res => {
-        if (res.ok) {
-          console.log(`✅ Discord updated for ${userId}`);
-        } else {
-          console.log(`❌ Failed to update Discord: ${res.status}`);
-        }
-      }).catch(err => {
-        console.log(`❌ Discord update error: ${err.message}`);
-      });
-    });
+    // Step 3: Update Discord
+    let embed;
+    
+    if (results.mongodb && results.roblox) {
+      // Full success
+      embed = {
+        ...message.embeds[0],
+        title: "✅ Appeal Accepted",
+        color: 3066993,
+        fields: [
+          ...message.embeds[0].fields,
+          { name: "Status", value: `Accepted by <@${member.user.id}>` },
+          { name: "Database", value: "✅ Unbanned" },
+          { name: "Roblox", value: "✅ Unbanned" }
+        ]
+      };
+    } else if (results.mongodb && !results.roblox) {
+      // MongoDB worked, Roblox failed
+      embed = {
+        ...message.embeds[0],
+        title: "⚠️ Partially Accepted",
+        color: 16776960,
+        fields: [
+          ...message.embeds[0].fields,
+          { name: "Status", value: `Accepted by <@${member.user.id}>` },
+          { name: "Database", value: "✅ Unbanned" },
+          { name: "Roblox", value: `❌ ${results.robloxError}\nPlease unban manually.` }
+        ]
+      };
+    } else if (!results.mongodb && results.roblox) {
+      // Roblox worked, MongoDB failed
+      embed = {
+        ...message.embeds[0],
+        title: "⚠️ Partially Accepted",
+        color: 16776960,
+        fields: [
+          ...message.embeds[0].fields,
+          { name: "Status", value: `Accepted by <@${member.user.id}>` },
+          { name: "Database", value: `❌ ${results.mongodbError}` },
+          { name: "Roblox", value: "✅ Unbanned" }
+        ]
+      };
+    } else {
+      // Both failed
+      embed = {
+        ...message.embeds[0],
+        title: "❌ Error Processing Appeal",
+        color: 15158332,
+        fields: [
+          ...message.embeds[0].fields,
+          { name: "Status", value: `Attempted by <@${member.user.id}>` },
+          { name: "Database", value: `❌ ${results.mongodbError}` },
+          { name: "Roblox", value: `❌ ${results.robloxError}` }
+        ]
+      };
+    }
+
+    await updateDiscordMessage(appId, token, message.id, embed);
+    console.log(`✅ Discord updated for ${userId}`);
 
   } else if (action === "decline") {
     console.log(`❌ Declining appeal for ${userId}`);
@@ -258,17 +225,25 @@ function processButton(action, userId, appId, token, message, member) {
       ]
     };
 
-    fetch(
-      `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
+    await updateDiscordMessage(appId, token, message.id, embed);
+  }
+}
+
+async function updateDiscordMessage(appId, token, messageId, embed) {
+  try {
+    const response = await fetch(
+      `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${messageId}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ embeds: [embed], components: [] })
       }
-    ).then(res => {
-      console.log(`✅ Appeal declined for ${userId}`);
-    }).catch(err => {
-      console.log(`❌ Error declining: ${err.message}`);
-    });
+    );
+    
+    if (!response.ok) {
+      console.error(`❌ Discord update failed: ${response.status}`);
+    }
+  } catch (err) {
+    console.error(`❌ Discord error:`, err);
   }
 }
