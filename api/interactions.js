@@ -48,6 +48,8 @@ export default async function handler(req, res) {
       const customId = data?.custom_id || "";
       const [action, userId] = customId.split("_");
 
+      console.log(`🔵 Button clicked: ${action} for user ${userId}`);
+
       // Respond immediately to prevent timeout
       res.status(200).json({ type: 6 });
 
@@ -72,98 +74,130 @@ async function handleButton(action, userId, appId, token, message, member) {
   const robloxKey = process.env.ROBLOX_API_KEY;
   const universeId = process.env.ROBLOX_UNIVERSE_ID;
 
+  console.log(`🔵 Starting ${action} for user ${userId}`);
+
   try {
     if (action === "accept") {
-      // Unban from sheet - AWAIT THIS!
-      const sheetResponse = await fetch(sheetUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "unban", userId }),
-      });
+      // ===== STEP 1: UNBAN FROM SHEET =====
+      console.log(`📊 Removing user ${userId} from spreadsheet...`);
+      
+      try {
+        const sheetResponse = await fetch(sheetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            action: "unban", 
+            userId: String(userId) // Ensure it's a string
+          }),
+        });
 
-      if (!sheetResponse.ok) {
-        console.error("Sheet unban failed:", await sheetResponse.text());
+        const sheetData = await sheetResponse.json();
+        console.log(`📊 Sheet response:`, sheetData);
+
+        if (!sheetResponse.ok || !sheetData.success) {
+          console.error("❌ Sheet unban failed:", sheetData);
+          throw new Error("Failed to remove from spreadsheet");
+        }
+
+        console.log(`✅ Successfully removed user ${userId} from spreadsheet`);
+      } catch (sheetError) {
+        console.error("❌ Sheet error:", sheetError);
+        
+        // Update Discord with sheet error
+        const embed = {
+          ...message.embeds[0],
+          title: "⚠️ Error Removing from Spreadsheet",
+          color: 16776960,
+          fields: [
+            ...message.embeds[0].fields,
+            { name: "Status", value: `Attempted by <@${member.user.id}>` },
+            { name: "Error", value: "Could not remove from spreadsheet. Check logs." }
+          ]
+        };
+
+        await fetch(
+          `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ embeds: [embed], components: [] }),
+          }
+        );
+        return;
       }
 
-      // Unban from Roblox - FIX: Use DELETE method, not PATCH
+      // ===== STEP 2: UNBAN FROM ROBLOX =====
+      let robloxSuccess = false;
+      let robloxError = null;
+
       if (robloxKey && universeId) {
+        console.log(`🎮 Unbanning user ${userId} from Roblox...`);
+        
         try {
+          // Roblox Cloud API - DELETE removes the user restriction
           const robloxResponse = await fetch(
             `https://apis.roblox.com/cloud/v2/universes/${universeId}/user-restrictions/${userId}`,
             { 
-              method: "DELETE", // ✅ FIXED: Changed from PATCH to DELETE
+              method: "DELETE",
               headers: { 
                 "x-api-key": robloxKey
               }
             }
           );
 
-          if (!robloxResponse.ok) {
+          console.log(`🎮 Roblox response status: ${robloxResponse.status}`);
+
+          if (robloxResponse.status === 200 || robloxResponse.status === 204) {
+            console.log(`✅ Successfully unbanned user ${userId} from Roblox`);
+            robloxSuccess = true;
+          } else if (robloxResponse.status === 404) {
+            // User wasn't banned in Roblox (might have been manual unban)
+            console.log(`⚠️ User ${userId} was not found in Roblox bans (already unbanned?)`);
+            robloxSuccess = true; // Still count as success
+          } else {
             const errorText = await robloxResponse.text();
-            console.error("Roblox unban failed:", errorText);
-            
-            const embed = {
-              ...message.embeds[0],
-              title: "⚠️ Appeal Accepted (Roblox Unban Failed)",
-              color: 16776960,
-              fields: [
-                ...message.embeds[0].fields,
-                { name: "Status", value: `Accepted by <@${member.user.id}>` },
-                { name: "Error", value: "Failed to unban from Roblox. Please unban manually." }
-              ]
-            };
-
-            await fetch(
-              `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
-              {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ embeds: [embed], components: [] }),
-              }
-            );
-            return;
+            console.error(`❌ Roblox unban failed (${robloxResponse.status}):`, errorText);
+            robloxError = `Status ${robloxResponse.status}: ${errorText}`;
           }
-
-          console.log(`✅ Successfully unbanned user ${userId} from Roblox`);
-        } catch (robloxError) {
-          console.error("Roblox API error:", robloxError);
-          
-          const embed = {
-            ...message.embeds[0],
-            title: "⚠️ Appeal Accepted (Roblox Error)",
-            color: 16776960,
-            fields: [
-              ...message.embeds[0].fields,
-              { name: "Status", value: `Accepted by <@${member.user.id}>` },
-              { name: "Error", value: "Could not connect to Roblox API. Please unban manually." }
-            ]
-          };
-
-          await fetch(
-            `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ embeds: [embed], components: [] }),
-            }
-          );
-          return;
+        } catch (robloxErr) {
+          console.error("❌ Roblox API error:", robloxErr);
+          robloxError = robloxErr.message;
         }
       } else {
-        console.warn("Missing ROBLOX_API_KEY or ROBLOX_UNIVERSE_ID");
+        console.warn("⚠️ Missing ROBLOX_API_KEY or ROBLOX_UNIVERSE_ID");
+        robloxError = "Missing Roblox credentials";
       }
 
-      // Update embed on success
-      const embed = {
-        ...message.embeds[0],
-        title: "✅ Appeal Accepted",
-        color: 3066993,
-        fields: [
-          ...message.embeds[0].fields,
-          { name: "Status", value: `Accepted by <@${member.user.id}>` },
-          { name: "Roblox", value: "✅ Player unbanned successfully" }
-        ]
-      };
+      // ===== STEP 3: UPDATE DISCORD EMBED =====
+      let embed;
+      
+      if (robloxSuccess) {
+        // Full success
+        embed = {
+          ...message.embeds[0],
+          title: "✅ Appeal Accepted",
+          color: 3066993, // Green
+          fields: [
+            ...message.embeds[0].fields,
+            { name: "Status", value: `Accepted by <@${member.user.id}>` },
+            { name: "Spreadsheet", value: "✅ Removed successfully" },
+            { name: "Roblox", value: "✅ Player unbanned successfully" }
+          ]
+        };
+      } else {
+        // Sheet success but Roblox failed
+        embed = {
+          ...message.embeds[0],
+          title: "⚠️ Partial Success",
+          color: 16776960, // Yellow
+          fields: [
+            ...message.embeds[0].fields,
+            { name: "Status", value: `Accepted by <@${member.user.id}>` },
+            { name: "Spreadsheet", value: "✅ Removed successfully" },
+            { name: "Roblox", value: `❌ Failed to unban\n${robloxError || "Unknown error"}` }
+          ]
+        };
+      }
 
       await fetch(
         `https://discord.com/api/v10/webhooks/${appId}/${token}/messages/${message.id}`,
@@ -174,11 +208,15 @@ async function handleButton(action, userId, appId, token, message, member) {
         }
       );
 
+      console.log(`✅ Discord embed updated for user ${userId}`);
+
     } else if (action === "decline") {
+      console.log(`❌ Declining appeal for user ${userId}`);
+      
       const embed = {
         ...message.embeds[0],
         title: "❌ Appeal Declined",
-        color: 15158332,
+        color: 15158332, // Red
         fields: [
           ...message.embeds[0].fields,
           { name: "Status", value: `Declined by <@${member.user.id}>` }
@@ -193,9 +231,11 @@ async function handleButton(action, userId, appId, token, message, member) {
           body: JSON.stringify({ embeds: [embed], components: [] }),
         }
       );
+
+      console.log(`✅ Appeal declined for user ${userId}`);
     }
   } catch (err) {
-    console.error("Button handler error:", err);
+    console.error("❌ Button handler error:", err);
     
     try {
       const embed = {
@@ -204,7 +244,7 @@ async function handleButton(action, userId, appId, token, message, member) {
         color: 15158332,
         fields: [
           ...message.embeds[0].fields,
-          { name: "Error", value: "An error occurred. Please try again or process manually." }
+          { name: "Error", value: `An error occurred: ${err.message}` }
         ]
       };
 
@@ -217,7 +257,7 @@ async function handleButton(action, userId, appId, token, message, member) {
         }
       );
     } catch (updateError) {
-      console.error("Failed to update message with error:", updateError);
+      console.error("❌ Failed to update message with error:", updateError);
     }
   }
 }
