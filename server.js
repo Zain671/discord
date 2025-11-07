@@ -9,6 +9,8 @@ const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 
 app.get("/", (req, res) => res.send("✅ Roblox Discord bot is online."));
 
+// OLD ENDPOINT - Keep for backwards compatibility
+// This still works if you haven't updated Roblox script yet
 app.post("/ban", async (req, res) => {
   const { username, userId, moderator, reason, duration } = req.body;
   
@@ -29,7 +31,6 @@ app.post("/ban", async (req, res) => {
   };
 
   try {
-    // ✅ FIXED: Using parentheses instead of backticks
     await fetch(`https://discord.com/api/v10/channels/${DISCORD_CHANNEL_ID}/messages`, {
       method: "POST",
       headers: {
@@ -46,19 +47,7 @@ app.post("/ban", async (req, res) => {
   }
 });
 
-// 🟢 Set the bot's online presence when the server starts
-async function setBotStatus() {
-  try {
-    // Note: Bot status is set via Gateway connection, not REST API
-    // This endpoint doesn't work for bots - you need a Gateway connection
-    // For now, just log that the bot is ready
-    console.log("✅ Bot server is online. Status will be set via Gateway if implemented.");
-  } catch (error) {
-    console.error("❌ Failed to set bot status:", error);
-  }
-}
-
-app.listen(3000, async () => {
+app.listen(3000, () => {
   console.log("Bot API running on port 3000");
-  await setBotStatus();
+  console.log("✅ MongoDB endpoints available at /api/*");
 });
