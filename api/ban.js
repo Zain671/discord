@@ -39,29 +39,28 @@ export default async function handler(req, res) {
     const bannedAt = new Date();
     const expiresAt = duration ? new Date(bannedAt.getTime() + duration * 1000) : null;
 
-    const banDocument = {
-      userId: String(userId),
-      username,
-      moderator,
-      reason,
-      duration: duration || null,
-      durationText: formatDuration(duration),
-      bannedAt,
-      expiresAt,
-      active: true,
-      createdAt: bannedAt,
-      updatedAt: bannedAt
-    };
+// Remove createdAt from banDocument
+const banDocument = {
+  userId: String(userId),
+  username,
+  moderator,
+  reason,
+  duration: duration || null,
+  durationText: formatDuration(duration),
+  bannedAt,
+  expiresAt,
+  active: true,
+  updatedAt: bannedAt // keep updatedAt, remove createdAt
+};
 
-    // Upsert (update if exists, insert if not)
-    await bansCollection.updateOne(
-      { userId: String(userId) },
-      { 
-        $set: banDocument,
-        $setOnInsert: { createdAt: bannedAt }
-      },
-      { upsert: true }
-    );
+await bansCollection.updateOne(
+  { userId: String(userId) },
+  { 
+    $set: banDocument,
+    $setOnInsert: { createdAt: bannedAt } // only sets createdAt if new
+  },
+  { upsert: true }
+);
 
     console.log(`✅ Ban saved to MongoDB for user ${userId}`);
 
