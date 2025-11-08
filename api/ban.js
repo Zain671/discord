@@ -1,6 +1,5 @@
 // api/ban.js
 // Ban a player and log to MongoDB + send to Discord
-
 import clientPromise from '../lib/mongodb.js';
 import fetch from 'node-fetch';
 
@@ -9,11 +8,11 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
+  
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-
+  
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -39,35 +38,35 @@ export default async function handler(req, res) {
     const bannedAt = new Date();
     const expiresAt = duration ? new Date(bannedAt.getTime() + duration * 1000) : null;
 
-// Remove createdAt from banDocument
-const banDocument = {
-  userId: String(userId),
-  username,
-  moderator,
-  reason,
-  duration: duration || null,
-  durationText: formatDuration(duration),
-  bannedAt,
-  expiresAt,
-  active: true,
-  updatedAt: bannedAt // keep updatedAt, remove createdAt
-};
+    const banDocument = {
+      userId: String(userId),
+      username,
+      moderator,
+      reason,
+      duration: duration || null,
+      durationText: formatDuration(duration),
+      bannedAt,
+      expiresAt,
+      active: true,
+      updatedAt: bannedAt
+    };
 
-await bansCollection.updateOne(
-  { userId: String(userId) },
-  { 
-    $set: banDocument,
-    $setOnInsert: { createdAt: bannedAt } // only sets createdAt if new
-  },
-  { upsert: true }
-);
+    // Upsert - update if exists, insert if new
+    await bansCollection.updateOne(
+      { userId: String(userId) },
+      { 
+        $set: banDocument,
+        $setOnInsert: { createdAt: bannedAt }
+      },
+      { upsert: true }
+    );
 
     console.log(`✅ Ban saved to MongoDB for user ${userId}`);
 
     // Send to Discord
     const discordBotToken = process.env.DISCORD_BOT_TOKEN;
     const discordChannelId = process.env.DISCORD_CHANNEL_ID;
-
+    
     if (discordBotToken && discordChannelId) {
       try {
         await sendToDiscord(discordBotToken, discordChannelId, {
@@ -128,16 +127,16 @@ async function sendToDiscord(botToken, channelId, data) {
     title: '🔨 Player Banned',
     color: 16776960, // Yellow
     fields: [
-      { name: 'Player', value: `${data.username} (ID: ${data.userId})` },
-      { name: 'Moderator', value: data.moderator },
-      { name: 'Reason', value: data.reason },
-      { name: 'Duration', value: data.duration }
+      { name: 'Player', value: `${data.username} (ID: ${data.userId})`, inline: true },
+      { name: 'Moderator', value: data.moderator, inline: true },
+      { name: 'Reason', value: data.reason, inline: false },
+      { name: 'Duration', value: data.duration, inline: true }
     ],
     footer: { text: 'Ban System' },
     timestamp: new Date().toISOString()
   };
 
-  await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+  const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: 'POST',
     headers: {
       'Authorization': `Bot ${botToken}`,
@@ -145,4 +144,8 @@ async function sendToDiscord(botToken, channelId, data) {
     },
     body: JSON.stringify({ embeds: [embed] })
   });
+
+  if (!response.ok) {
+    throw new Error(`Discord API error: ${response.status}`);
+  }
 }
