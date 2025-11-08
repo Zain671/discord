@@ -92,16 +92,16 @@ async function processButton(action, userId, appId, token, message, member) {
       const db = client.db(process.env.MONGODB_DB_NAME || 'roblox_bans');
       const bansCollection = db.collection('bans');
 
-      const result = await bansCollection.updateOne(
-        { userId: String(userId) },
-        { 
-          $set: { 
-            active: false,
-            unbannedAt: new Date(),
-            updatedAt: new Date()
-          }
-        }
-      );
+const result = await bansCollection.updateOne(
+  { $or: [ { userId: String(userId) }, { userId: Number(userId) } ] },
+  { 
+    $set: { 
+      active: false,
+      unbannedAt: new Date(),
+      updatedAt: new Date()
+    }
+  }
+);
 
       if (result.matchedCount > 0) {
         results.mongodb = true;
