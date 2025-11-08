@@ -7,7 +7,7 @@
     "node-fetch": "^3.3.0",
     "tweetnacl": "^1.0.3",
     "mongodb": "^6.3.0"
-  },
+  }
   "scripts": {
     "dev": "vercel dev",
     "start": "vercel dev"
