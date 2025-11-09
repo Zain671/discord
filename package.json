@@ -1,1 +1,15 @@
+{
+  "name": "roblox-discord-bot-mongodb",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Roblox Discord ban bot with MongoDB (Serverless Vercel API)",
+  "dependencies": {
+    "node-fetch": "^3.3.0",
+    "tweetnacl": "^1.0.3",
+    "mongodb": "^6.3.0"
+  },
+  "engines": {
+    "node": ">=22.x"
+  }
+}
 
