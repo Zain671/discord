@@ -1,6 +1,3 @@
-// api/check-ban.js
-// Check if a player is banned
-
 import clientPromise from '../lib/mongodb.js';
 
 export default async function handler(req, res) {
