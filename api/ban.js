@@ -1,6 +1,3 @@
-// api/ban.js
-// Ban a player and log to MongoDB + send to Discord
-
 import clientPromise from '../lib/mongodb.js';
 import fetch from 'node-fetch';
 
