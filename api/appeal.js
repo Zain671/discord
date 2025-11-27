@@ -1,6 +1,3 @@
-// api/appeal.js
-// Appeal submission endpoint - sends appeal to Discord with Accept/Decline buttons
-
 import fetch from "node-fetch";
 
 export default async function handler(req, res) {
