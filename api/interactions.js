@@ -1,7 +1,3 @@
-
-// api/interactions.js
-// Discord interaction handler with MongoDB + Roblox Cloud API
-
 import nacl from "tweetnacl";
 import clientPromise from '../lib/mongodb.js';
 import fetch from 'node-fetch';
